@@ -1,0 +1,20 @@
+# окружение
+.env
+.venv/
+venv/
+
+# компиляты Python
+__pycache__/
+*.py[cod]
+
+# зависимости Poetry virtualenv
+.installed.cfg
+
+# Docker
+db-data/
+
+# VS Code
+.vscode/
+
+# системные
+.DS_Store
