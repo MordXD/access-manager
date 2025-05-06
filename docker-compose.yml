@@ -1,0 +1,32 @@
+services:
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: access_db
+      POSTGRES_USER: access_user
+      POSTGRES_PASSWORD: access_pass
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      # Проверяем, что пользователь access_user может подключиться к базе access_db
+      test: ["CMD-SHELL", "pg_isready -U access_user -d access_db -h localhost"]
+      interval: 10s
+      timeout: 5s # Добавим таймаут
+      retries: 5
+    ports: # Можно добавить для отладки с хоста, если нужно
+      - "5432:5432"
+
+  app:
+    build: .
+    command: uvicorn src.access_manager.main:app --host 0.0.0.0 --port 8000 --reload
+    env_file: .env # Это правильно, docker-compose загрузит переменные из .env в окружение контейнера app
+    volumes:
+      - ./src:/code/src
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  db-data:
