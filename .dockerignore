@@ -1,0 +1,19 @@
+# игнорировать систему контроля версий
+.git
+.gitignore
+
+# игнорировать IDE- и редакторские папки
+.vscode
+.idea
+
+# игнорировать WSL-специфику и логи
+*.log
+*.tmp
+
+# если есть локальные venv/poetry env
+.venv
+__pycache__
+*.pyc
+
+# node_modules, если они есть
+node_modules
