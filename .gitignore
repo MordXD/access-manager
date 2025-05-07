@@ -2,6 +2,11 @@
 .env
 .venv/
 venv/
+# API-коллекции Bruno и отчёты
+Access Manager API/
+*.bru
+bruno-report*.json
+openapi.json
 
 # компиляты Python
 __pycache__/

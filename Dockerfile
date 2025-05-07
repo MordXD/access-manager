@@ -2,20 +2,28 @@ FROM python:3.12-slim
 
 WORKDIR /code
 
-# Устанавливаем Poetry (единожды)
-# Обновляем pip и устанавливаем poetry
-RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir poetry
+# 1. Устанавливаем системные пакеты для сборки C-расширений и libpq
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      build-essential \
+      libpq-dev \
+ && rm -rf /var/lib/apt/lists/*
 
-# Копируем только файлы зависимостей
+# 2. Устанавливаем Poetry
+RUN pip install --no-cache-dir --upgrade pip \
+ && pip install --no-cache-dir poetry==1.7.1 
+
+# 3. Копируем только файлы зависимостей
 COPY pyproject.toml poetry.lock* README.md /code/
 
-# Устанавливаем зависимости БЕЗ установки текущего проекта (root package)
+# 4. Устанавливаем зависимости через Poetry (без проекта)
 RUN poetry config virtualenvs.create false \
-    && poetry install --no-root --no-interaction --no-ansi
+ && poetry install --no-root --no-interaction --no-ansi
 
-# Копируем исходники
+# 5. Копируем исходники и миграции
 COPY src/ /code/src/
+COPY alembic.ini /code/
+COPY alembic/ /code/alembic/
 
-# Точка входа (будет переопределена docker-compose.yml, но хорошо иметь для самостоятельной сборки)
+# 6. Точка входа
 CMD ["uvicorn", "src.access_manager.main:app", "--host", "0.0.0.0", "--port", "8000"]
