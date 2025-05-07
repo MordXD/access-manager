@@ -44,11 +44,9 @@ flowchart LR
   Browser -->|JWT| Frontend[React SPA]
   Frontend -->|REST| API[FastAPI]
   API -->|SQL| DB[(PostgreSQL)]
-  API -->|Cache| Redis[(Redis)]
   subgraph "Docker Compose"
     API
     DB
-    Redis
   end
 ```
 
