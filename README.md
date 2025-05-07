@@ -43,12 +43,12 @@ open http://localhost:8000/docs  # Swagger UI
 flowchart LR
   Browser -->|JWT| Frontend[React SPA]
   Frontend -->|REST| API[FastAPI]
-  API --> DB[(PostgreSQL)]
-  API --> Cache[(Redis)]
-  subgraph Docker‑Compose
+  API -->|SQL| DB[(PostgreSQL)]
+  API -->|Cache| Redis[(Redis)]
+  subgraph "Docker Compose"
     API
     DB
-    Cache
+    Redis
   end
 ```
 
@@ -147,11 +147,10 @@ poetry run pytest -q
 ├── frontend/           # React‑клиент (SPA)
 │   └── src/
 ├── src/access_manager/ # FastAPI‑приложение
-│   ├── core/           # config
+│   ├── core/           # config, security
 │   ├── crud.py         # бизнес‑операции
 │   ├── db.py           # SQLAlchemy engine/session
 │   ├── main.py         # роуты
-│   ├── security.py     # security
 │   └── models.py       # ORM‑модели
 ├── tests/              # pytest + httpx
 ├── Dockerfile          # образ backend
@@ -166,7 +165,7 @@ poetry run pytest -q
 * [x] Полное CRUD + RBAC
 * [x] Асинхронный SQLAlchemy 2
 * [x] Интеграционные pytest
-* [x] Refresh‑токены
+* [ ] Refresh‑токены
 * [ ] Web‑socket уведомления
 * [ ] Helm chart для Kubernetes
 
