@@ -1,3 +1,6 @@
+# docker-compose.yml
+version: "3.9"
+
 services:
   db:
     image: postgres:15
@@ -8,25 +11,46 @@ services:
     volumes:
       - db-data:/var/lib/postgresql/data
     healthcheck:
-      # Проверяем, что пользователь access_user может подключиться к базе access_db
       test: ["CMD-SHELL", "pg_isready -U access_user -d access_db -h localhost"]
       interval: 10s
-      timeout: 5s # Добавим таймаут
+      timeout: 5s
       retries: 5
-    ports: # Можно добавить для отладки с хоста, если нужно
-      - "5433:5432"
-
-  app:
-    build: .
-    command: sh -c "poetry run alembic upgrade head && uvicorn src.access_manager.main:app --host 0.0.0.0 --port 8000 --reload"
-    env_file: .env # Это правильно, docker-compose загрузит переменные из .env в окружение контейнера app
-    volumes:
-      - ./src:/code/src
     ports:
-      - "8000:8000"
+      - "5433:5432" # PostgreSQL будет доступен на хосте через порт 5433
+
+  backend: # Переименовал 'app' в 'backend' для ясности
+    build:
+      context: . # Если Dockerfile для FastAPI в корне
+      dockerfile: Dockerfile # Укажи имя Dockerfile для FastAPI (тот, что ты показывал в прошлом сообщении)
+    command: sh -c "poetry run alembic upgrade head && uvicorn src.access_manager.main:app --host 0.0.0.0 --port 8000 --reload"
+    env_file: .env # Убедись, что этот файл существует в корне и содержит переменные
+    volumes:
+      - ./src:/code/src # Для FastAPI --reload
+      # Твой Dockerfile для FastAPI уже копирует alembic и alembic.ini,
+      # так что следующие два volume mount могут быть не нужны,
+      # если ты не планируешь менять миграции "на лету" без пересборки образа backend.
+      # - ./alembic:/code/alembic
+      # - ./alembic.ini:/code/alembic.ini
+    ports:
+      - "8000:8000" # API будет доступен на localhost:8000
     depends_on:
       db:
         condition: service_healthy
+    # Важно передавать переменные окружения, если env_file их не содержит или для явности
+    # environment:
+    #   - POSTGRES_DSN=${POSTGRES_DSN} # Например: postgresql://access_user:access_pass@db:5432/access_db
+    #   - SECRET_KEY=${SECRET_KEY}
+    #   - ALGORITHM=${ALGORITHM}
+    #   - ACCESS_TOKEN_EXPIRE_MINUTES=${ACCESS_TOKEN_EXPIRE_MINUTES}
+
+  frontend:
+    build:
+      context: ./frontend    # Путь к директории frontend/
+      dockerfile: Dockerfile # Dockerfile будет внутри frontend/
+    ports:
+      - "3000:80" # React UI будет доступен на localhost:3000 (Nginx внутри слушает на 80)
+    depends_on:
+      - backend # Нестрогая зависимость
 
 volumes:
   db-data:
