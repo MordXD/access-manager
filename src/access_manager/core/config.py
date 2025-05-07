@@ -1,3 +1,4 @@
+from typing import Optional
 from pydantic import PostgresDsn
 from pydantic_settings import BaseSettings # Используйте pydantic_settings для Pydantic v2+
 
@@ -6,9 +7,9 @@ class Settings(BaseSettings):
     secret_key: str
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 30
-
+    test_postgres_dsn: Optional[PostgresDsn] = None
     class Config:
-
-        pass
+        env_file = ".env"
+        env_file_encoding = 'utf-8' 
 
 settings = Settings()
