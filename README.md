@@ -3,7 +3,7 @@
 [![Tests](https://img.shields.io/github/actions/workflow/status/<YOUR_GH_USERNAME>/access-manager/ci.yml?label=tests)](../../actions)  [![Coverage](https://img.shields.io/badge/coverage-90%25-brightgreen)](../../actions)  [![Docker Pulls](https://img.shields.io/docker/pulls/<YOUR_DOCKERHUB_USERNAME>/access-manager)](https://hub.docker.com/r/<YOUR_DOCKERHUB_USERNAME>/access-manager)
 
 <p align="center">
-  <img src="assets/1.jpeg" alt="Главная страница Access Manager" width="700"/>
+  <img src="assets/1.jpg" alt="Главная страница Access Manager" width="700"/>
 </p>
 
 > **Современная RBAC‑платформа** на FastAPI + React, закрывающая 80 % типовых задач управления доступом «из коробки» и запускаемая одной командой `docker‑compose up`.
