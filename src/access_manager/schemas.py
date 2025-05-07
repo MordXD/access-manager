@@ -83,8 +83,6 @@ class UserCreate(BaseModel):
     username: str = Field(..., min_length=3, max_length=100)
     email: EmailStr
     password: str = Field(..., min_length=8)
-    is_active: bool = True
-    is_superuser: bool = False
     role_ids: List[int] = Field(default_factory=list)
 
 

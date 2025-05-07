@@ -1,0 +1,20 @@
+meta {
+  name: Create User
+  type: http
+  seq: 2
+}
+
+post {
+  url: http://0.0.0.0:8000/users/
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "username": "mordxd",
+    "email": "kotkinegor78@gmail.com",
+    "password": "Egor231326",
+    "role_ids": []
+  }
+}

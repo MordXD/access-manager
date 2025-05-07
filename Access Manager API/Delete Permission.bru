@@ -1,0 +1,15 @@
+meta {
+  name: Delete Permission
+  type: http
+  seq: 16
+}
+
+delete {
+  url: {{baseUrl}}/permissions/:perm_id
+  body: none
+  auth: none
+}
+
+params:path {
+  perm_id: 
+}

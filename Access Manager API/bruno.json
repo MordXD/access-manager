@@ -1,0 +1,9 @@
+{
+  "version": "1",
+  "name": "Access Manager API",
+  "type": "collection",
+  "ignore": [
+    "node_modules",
+    ".git"
+  ]
+}

@@ -1,4 +1,7 @@
+# src/access_manager/crud.py
+
 from typing import List, Optional
+from datetime import timedelta
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
@@ -20,10 +23,13 @@ from src.access_manager.security import get_password_hash
 async def get_user(db: AsyncSession, user_id: int) -> Optional[User]:
     result = await db.execute(
         select(User)
-        .options(joinedload(User.roles).joinedload(Role.permissions))
+        .options(
+            joinedload(User.roles).joinedload(Role.permissions)
+        )
         .where(User.id == user_id)
     )
     return result.scalar_one_or_none()
+
 
 async def get_user_by_username(db: AsyncSession, username: str) -> Optional[User]:
     result = await db.execute(
@@ -31,6 +37,7 @@ async def get_user_by_username(db: AsyncSession, username: str) -> Optional[User
         .where(User.username == username)
     )
     return result.scalar_one_or_none()
+
 
 async def get_users(db: AsyncSession, skip: int = 0, limit: int = 100) -> List[User]:
     result = await db.execute(
@@ -41,15 +48,14 @@ async def get_users(db: AsyncSession, skip: int = 0, limit: int = 100) -> List[U
     )
     return result.scalars().all()
 
+
 async def create_user(db: AsyncSession, data: UserCreate) -> User:
-    # хэшируем пароль
+    # hash password
     hashed = get_password_hash(data.password)
     user = User(
         username=data.username,
         email=data.email,
         hashed_password=hashed,
-        is_active=data.is_active,
-        is_superuser=data.is_superuser,
     )
     if data.role_ids:
         q = await db.execute(select(Role).where(Role.id.in_(data.role_ids)))
@@ -58,14 +64,21 @@ async def create_user(db: AsyncSession, data: UserCreate) -> User:
     db.add(user)
     try:
         await db.commit()
-        await db.refresh(user)
     except IntegrityError:
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="User with given username or email already exists."
         )
-    return user
+
+    # reload with eager relationships
+    result = await db.execute(
+        select(User)
+        .options(joinedload(User.roles).joinedload(Role.permissions))
+        .where(User.id == user.id)
+    )
+    return result.scalar_one()
+
 
 async def update_user(db: AsyncSession, user_id: int, data: UserUpdate) -> Optional[User]:
     user = await get_user(db, user_id)
@@ -83,14 +96,21 @@ async def update_user(db: AsyncSession, user_id: int, data: UserUpdate) -> Optio
 
     try:
         await db.commit()
-        await db.refresh(user)
     except IntegrityError:
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Update conflict: fields must be unique."
         )
-    return user
+
+    # reload with eager relationships
+    result = await db.execute(
+        select(User)
+        .options(joinedload(User.roles).joinedload(Role.permissions))
+        .where(User.id == user.id)
+    )
+    return result.scalar_one()
+
 
 async def delete_user(db: AsyncSession, user_id: int) -> Optional[User]:
     user = await get_user(db, user_id)
@@ -131,14 +151,19 @@ async def create_role(db: AsyncSession, data: RoleCreate) -> Role:
     db.add(role)
     try:
         await db.commit()
-        await db.refresh(role)
     except IntegrityError:
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Role with given name already exists."
         )
-    return role
+
+    result = await db.execute(
+        select(Role)
+        .options(joinedload(Role.permissions))
+        .where(Role.id == role.id)
+    )
+    return result.scalar_one()
 
 
 async def update_role(db: AsyncSession, role_id: int, data: RoleUpdate) -> Optional[Role]:
@@ -155,14 +180,19 @@ async def update_role(db: AsyncSession, role_id: int, data: RoleUpdate) -> Optio
 
     try:
         await db.commit()
-        await db.refresh(role)
     except IntegrityError:
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Update conflict: fields must be unique."
         )
-    return role
+
+    result = await db.execute(
+        select(Role)
+        .options(joinedload(Role.permissions))
+        .where(Role.id == role.id)
+    )
+    return result.scalar_one()
 
 
 async def delete_role(db: AsyncSession, role_id: int) -> Optional[Role]:
@@ -178,14 +208,17 @@ async def delete_role(db: AsyncSession, role_id: int) -> Optional[Role]:
 
 async def get_permission(db: AsyncSession, perm_id: int) -> Optional[Permission]:
     result = await db.execute(
-        select(Permission).where(Permission.id == perm_id)
+        select(Permission)
+        .where(Permission.id == perm_id)
     )
     return result.scalar_one_or_none()
 
 
 async def get_permissions(db: AsyncSession, skip: int = 0, limit: int = 100) -> List[Permission]:
     result = await db.execute(
-        select(Permission).offset(skip).limit(limit)
+        select(Permission)
+        .offset(skip)
+        .limit(limit)
     )
     return result.scalars().all()
 
@@ -195,14 +228,18 @@ async def create_permission(db: AsyncSession, data: PermissionCreate) -> Permiss
     db.add(perm)
     try:
         await db.commit()
-        await db.refresh(perm)
     except IntegrityError:
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Permission with given name already exists."
         )
-    return perm
+
+    result = await db.execute(
+        select(Permission)
+        .where(Permission.id == perm.id)
+    )
+    return result.scalar_one()
 
 
 async def update_permission(db: AsyncSession, perm_id: int, data: PermissionUpdate) -> Optional[Permission]:
@@ -215,14 +252,18 @@ async def update_permission(db: AsyncSession, perm_id: int, data: PermissionUpda
 
     try:
         await db.commit()
-        await db.refresh(perm)
     except IntegrityError:
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Update conflict: fields must be unique."
         )
-    return perm
+
+    result = await db.execute(
+        select(Permission)
+        .where(Permission.id == perm.id)
+    )
+    return result.scalar_one()
 
 
 async def delete_permission(db: AsyncSession, perm_id: int) -> Optional[Permission]:
