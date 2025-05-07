@@ -1,11 +1,42 @@
+from datetime import timedelta
+from typing import Annotated
+
 from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from . import crud, schemas
 from .db import get_db
+from src.access_manager import security
+from src.access_manager.core.config import settings
 
 app = FastAPI(title="Access Manager API")
 
+
+# Pydantic-модель для ответа
+class TokenResponse(schemas.BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+
+
+@app.post("/login/token", response_model=TokenResponse)
+async def login_for_access_token(
+    form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
+    db: AsyncSession = Depends(get_db),
+):
+    user = await crud.get_user_by_username(db, form_data.username)
+    if not user or not security.verify_password(form_data.password, user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    expires = timedelta(minutes=settings.access_token_expire_minutes)
+    token = security.create_access_token(
+        data={"sub": str(user.id)}, expires_delta=expires
+    )
+    return {"access_token": token, "token_type": "bearer"}
 
 # ——— USER эндпоинты ———
 
