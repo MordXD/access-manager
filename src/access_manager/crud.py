@@ -77,7 +77,7 @@ async def create_user(db: AsyncSession, data: UserCreate) -> User:
         .options(joinedload(User.roles).joinedload(Role.permissions))
         .where(User.id == user.id)
     )
-    return result.scalar_one()
+    return result.unique().scalar_one()
 
 
 async def update_user(db: AsyncSession, user_id: int, data: UserUpdate) -> Optional[User]:
@@ -109,7 +109,7 @@ async def update_user(db: AsyncSession, user_id: int, data: UserUpdate) -> Optio
         .options(joinedload(User.roles).joinedload(Role.permissions))
         .where(User.id == user.id)
     )
-    return result.scalar_one()
+    return result.unique().scalar_one()
 
 
 async def delete_user(db: AsyncSession, user_id: int) -> Optional[User]:

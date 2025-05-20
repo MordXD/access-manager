@@ -57,6 +57,26 @@ async def login_for_access_token(
 
 
 # --------------------------------------
+#   РЕГИСТРАЦИЯ НОВОГО ПОЛЬЗОВАТЕЛЯ
+# --------------------------------------
+
+@app.post(
+    "/register",
+    response_model=schemas.UserRead,
+    status_code=status.HTTP_201_CREATED
+)
+async def register_new_user(
+    payload: schemas.UserCreate,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Регистрация нового пользователя.
+    Доступно без аутентификации.
+    """
+    return await crud.create_user(db, payload)
+
+
+# --------------------------------------
 #   ЗАЩИЩЕННЫЕ ЭНДПОИНТЫ
 # --------------------------------------
 
