@@ -1,0 +1,152 @@
+replicaCount: 2
+
+image:
+  repository: your-dockerhub-username/access-manager
+  pullPolicy: IfNotPresent
+  tag: "latest"
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+
+podSecurityContext:
+  fsGroup: 2000
+
+securityContext:
+  capabilities:
+    drop:
+    - ALL
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 1000
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8000
+
+ingress:
+  enabled: true
+  className: ""
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/rate-limit: "100"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+  hosts:
+    - host: access-manager.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: access-manager-tls
+      hosts:
+        - access-manager.example.com
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 250m
+    memory: 256Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 80
+  targetMemoryUtilizationPercentage: 80
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+    - weight: 100
+      podAffinityTerm:
+        labelSelector:
+          matchExpressions:
+          - key: app.kubernetes.io/name
+            operator: In
+            values:
+            - access-manager
+        topologyKey: kubernetes.io/hostname
+
+# Конфигурация приложения
+app:
+  secretKey: "your-secret-key-here"
+  algorithm: "HS256"
+  accessTokenExpireMinutes: 30
+  environment: "production"
+
+# Конфигурация базы данных
+database:
+  host: "postgresql"
+  port: 5432
+  name: "access_db"
+  user: "access_user"
+  password: "access_pass"
+  sslmode: "require"
+
+# PostgreSQL Dependency
+postgresql:
+  enabled: true
+  auth:
+    postgresPassword: "postgres-admin-password"
+    username: "access_user"
+    password: "access_pass"
+    database: "access_db"
+  primary:
+    persistence:
+      enabled: true
+      size: 8Gi
+  metrics:
+    enabled: true
+
+# Мониторинг
+monitoring:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+    namespace: monitoring
+    interval: 30s
+    scrapeTimeout: 10s
+
+# Проверки здоровья
+healthCheck:
+  enabled: true
+  livenessProbe:
+    httpGet:
+      path: /health
+      port: http
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readinessProbe:
+    httpGet:
+      path: /health
+      port: http
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+# Резервное копирование
+backup:
+  enabled: true
+  schedule: "0 2 * * *"
+  retention: "7d"
+  storage:
+    class: "default"
+    size: "10Gi" 

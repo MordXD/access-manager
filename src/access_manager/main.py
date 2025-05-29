@@ -2,11 +2,15 @@
 
 from datetime import timedelta
 from typing import Annotated
+import time
+import psutil
+import asyncio
 
-from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi import FastAPI, Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 
 from src.access_manager import crud, schemas
 from src.access_manager.db import get_db
@@ -18,6 +22,14 @@ app = FastAPI(title="Access Manager API")
 
 origins = ["http://localhost:3000"]
 
+# Middleware для логирования времени запросов
+@app.middleware("http")
+async def add_process_time_header(request: Request, call_next):
+    start_time = time.time()
+    response = await call_next(request)
+    process_time = time.time() - start_time
+    response.headers["X-Process-Time"] = str(process_time)
+    return response
 
 app.add_middleware(
     CORSMiddleware,
@@ -26,6 +38,111 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Health Check Endpoint
+@app.get("/health")
+async def health_check(db: AsyncSession = Depends(get_db)):
+    """
+    Проверка здоровья сервиса и его зависимостей.
+    """
+    health_status = {
+        "status": "healthy",
+        "timestamp": time.time(),
+        "version": "0.1.0",
+        "checks": {}
+    }
+    
+    # Проверка подключения к базе данных
+    try:
+        result = await db.execute(text("SELECT 1"))
+        await result.fetchone()
+        health_status["checks"]["database"] = {
+            "status": "healthy",
+            "response_time": time.time()
+        }
+    except Exception as e:
+        health_status["status"] = "unhealthy"
+        health_status["checks"]["database"] = {
+            "status": "unhealthy",
+            "error": str(e)
+        }
+    
+    # Проверка использования ресурсов
+    try:
+        cpu_percent = psutil.cpu_percent(interval=0.1)
+        memory = psutil.virtual_memory()
+        disk = psutil.disk_usage('/')
+        
+        health_status["checks"]["resources"] = {
+            "status": "healthy",
+            "cpu_percent": cpu_percent,
+            "memory_percent": memory.percent,
+            "disk_percent": disk.percent
+        }
+        
+        # Предупреждение при высоком использовании ресурсов
+        if cpu_percent > 80 or memory.percent > 80 or disk.percent > 90:
+            health_status["status"] = "degraded"
+            health_status["checks"]["resources"]["status"] = "degraded"
+            
+    except Exception as e:
+        health_status["checks"]["resources"] = {
+            "status": "unhealthy",
+            "error": str(e)
+        }
+    
+    status_code = 200 if health_status["status"] in ["healthy", "degraded"] else 503
+    return health_status
+
+@app.get("/metrics")
+async def get_metrics(db: AsyncSession = Depends(get_db)):
+    """
+    Метрики для мониторинга Prometheus.
+    """
+    try:
+        # Получение базовых метрик
+        users_count = await crud.get_users_count(db)
+        roles_count = await crud.get_roles_count(db) 
+        permissions_count = await crud.get_permissions_count(db)
+        
+        # Системные метрики
+        cpu_usage = psutil.cpu_percent(interval=0.1)
+        memory = psutil.virtual_memory()
+        disk = psutil.disk_usage('/')
+        
+        metrics = f"""# HELP access_manager_users_total Total number of users
+# TYPE access_manager_users_total gauge
+access_manager_users_total {users_count}
+
+# HELP access_manager_roles_total Total number of roles
+# TYPE access_manager_roles_total gauge
+access_manager_roles_total {roles_count}
+
+# HELP access_manager_permissions_total Total number of permissions
+# TYPE access_manager_permissions_total gauge
+access_manager_permissions_total {permissions_count}
+
+# HELP access_manager_cpu_usage_percent CPU usage percentage
+# TYPE access_manager_cpu_usage_percent gauge
+access_manager_cpu_usage_percent {cpu_usage}
+
+# HELP access_manager_memory_usage_percent Memory usage percentage
+# TYPE access_manager_memory_usage_percent gauge
+access_manager_memory_usage_percent {memory.percent}
+
+# HELP access_manager_disk_usage_percent Disk usage percentage
+# TYPE access_manager_disk_usage_percent gauge
+access_manager_disk_usage_percent {disk.percent}
+"""
+        
+        return metrics
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to collect metrics: {str(e)}"
+        )
+
 # --------------------------------------
 #   AUTH: получение и проверка токена
 # --------------------------------------

@@ -1,0 +1,219 @@
+name: Monitoring & Alerts
+
+on:
+  schedule:
+    # Проверка каждые 5 минут
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+jobs:
+  health-check:
+    runs-on: ubuntu-latest
+    name: Проверка здоровья сервисов
+    
+    strategy:
+      matrix:
+        environment: [staging, production]
+    
+    steps:
+    - name: Проверка API
+      id: api-check
+      run: |
+        if [ "${{ matrix.environment }}" == "staging" ]; then
+          URL="${{ secrets.STAGING_URL }}"
+        else
+          URL="${{ secrets.PROD_URL }}"
+        fi
+        
+        # Проверка основных эндпоинтов
+        curl -f -s "$URL/docs" > /dev/null
+        curl -f -s "$URL/health" > /dev/null
+        
+        # Проверка времени ответа
+        RESPONSE_TIME=$(curl -o /dev/null -s -w '%{time_total}' "$URL/health")
+        echo "response_time=$RESPONSE_TIME" >> $GITHUB_OUTPUT
+        
+        # Проверка что время ответа менее 2 секунд
+        if (( $(echo "$RESPONSE_TIME > 2.0" | bc -l) )); then
+          echo "API response time too slow: ${RESPONSE_TIME}s"
+          exit 1
+        fi
+    
+    - name: Уведомление о проблемах
+      if: failure()
+      uses: 8398a7/action-slack@v3
+      with:
+        status: failure
+        channel: '#alerts'
+        text: |
+          🚨 Проблема с ${{ matrix.environment }}!
+          API не отвечает или работает медленно
+          URL: ${{ matrix.environment == 'staging' && secrets.STAGING_URL || secrets.PROD_URL }}
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+  database-check:
+    runs-on: ubuntu-latest
+    name: Проверка базы данных
+    
+    strategy:
+      matrix:
+        environment: [staging, production]
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Проверка подключения к БД
+      run: |
+        if [ "${{ matrix.environment }}" == "staging" ]; then
+          DB_HOST="${{ secrets.STAGING_DB_HOST }}"
+          DB_PASSWORD="${{ secrets.STAGING_DB_PASSWORD }}"
+        else
+          DB_HOST="${{ secrets.PROD_DB_HOST }}"
+          DB_PASSWORD="${{ secrets.PROD_DB_PASSWORD }}"
+        fi
+        
+        # Установка PostgreSQL клиента
+        sudo apt-get update
+        sudo apt-get install -y postgresql-client
+        
+        # Проверка подключения
+        PGPASSWORD="$DB_PASSWORD" psql -h "$DB_HOST" -U access_user -d access_db -c "SELECT 1;"
+    
+    - name: Уведомление о проблемах с БД
+      if: failure()
+      uses: 8398a7/action-slack@v3
+      with:
+        status: failure
+        channel: '#alerts'
+        text: |
+          🔴 Проблема с базой данных в ${{ matrix.environment }}!
+          Не удается подключиться к PostgreSQL
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+  performance-test:
+    runs-on: ubuntu-latest
+    name: Тестирование производительности
+    if: github.event_name == 'workflow_dispatch'
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Установка k6
+      run: |
+        sudo gpg -k
+        sudo gpg --no-default-keyring --keyring /usr/share/keyrings/k6-archive-keyring.gpg --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys C5AD17C747E3415A3642D57D77C6C491D6AC1D69
+        echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" | sudo tee /etc/apt/sources.list.d/k6.list
+        sudo apt-get update
+        sudo apt-get install k6
+    
+    - name: Запуск нагрузочного тестирования
+      run: |
+        cat > load-test.js << 'EOF'
+        import http from 'k6/http';
+        import { check, sleep } from 'k6';
+        
+        export let options = {
+          stages: [
+            { duration: '2m', target: 10 },
+            { duration: '5m', target: 10 },
+            { duration: '2m', target: 20 },
+            { duration: '5m', target: 20 },
+            { duration: '2m', target: 0 },
+          ],
+          thresholds: {
+            http_req_duration: ['p(95)<2000'],
+            http_req_failed: ['rate<0.05'],
+          },
+        };
+        
+        export default function () {
+          let response = http.get('${{ secrets.STAGING_URL }}/docs');
+          check(response, {
+            'status is 200': (r) => r.status === 200,
+            'response time < 2s': (r) => r.timings.duration < 2000,
+          });
+          sleep(1);
+        }
+        EOF
+        
+        k6 run load-test.js
+    
+    - name: Результаты нагрузочного тестирования
+      if: always()
+      uses: 8398a7/action-slack@v3
+      with:
+        status: ${{ job.status }}
+        channel: '#performance'
+        text: |
+          📊 Результаты нагрузочного тестирования
+          Status: ${{ job.status }}
+          Подробности в Actions: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+  security-monitoring:
+    runs-on: ubuntu-latest
+    name: Мониторинг безопасности
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Проверка SSL сертификатов
+      run: |
+        for url in "${{ secrets.STAGING_URL }}" "${{ secrets.PROD_URL }}"; do
+          if [[ $url == https://* ]]; then
+            domain=$(echo $url | sed 's|https://||' | cut -d'/' -f1)
+            expiry=$(echo | openssl s_client -servername $domain -connect $domain:443 2>/dev/null | openssl x509 -noout -dates | grep notAfter | cut -d= -f2)
+            expiry_epoch=$(date -d "$expiry" +%s)
+            current_epoch=$(date +%s)
+            days_until_expiry=$(( (expiry_epoch - current_epoch) / 86400 ))
+            
+            echo "SSL certificate for $domain expires in $days_until_expiry days"
+            
+            if [ $days_until_expiry -lt 30 ]; then
+              echo "WARNING: SSL certificate expires soon!"
+              exit 1
+            fi
+          fi
+        done
+    
+    - name: Уведомление о проблемах с SSL
+      if: failure()
+      uses: 8398a7/action-slack@v3
+      with:
+        status: failure
+        channel: '#security'
+        text: |
+          ⚠️ Проблема с SSL сертификатами!
+          Один или несколько сертификатов истекают в ближайшие 30 дней
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+  backup-verification:
+    runs-on: ubuntu-latest
+    name: Проверка резервных копий
+    if: github.event_name == 'schedule'
+    
+    steps:
+    - name: Проверка последнего бэкапа
+      run: |
+        # Здесь должна быть логика проверки последнего бэкапа
+        # Например, через kubectl или API вашей системы бэкапов
+        echo "Checking latest backup..."
+        
+        # Пример: проверка что последний бэкап не старше 24 часов
+        # kubectl get jobs -n production -l app=db-backup --sort-by=.metadata.creationTimestamp
+    
+    - name: Уведомление о проблемах с бэкапами
+      if: failure()
+      uses: 8398a7/action-slack@v3
+      with:
+        status: failure
+        channel: '#alerts'
+        text: |
+          💾 Проблема с резервными копиями!
+          Последний бэкап не найден или устарел
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }} 

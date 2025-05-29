@@ -1,0 +1,226 @@
+name: CD Pipeline
+
+on:
+  push:
+    branches: 
+      - main
+      - develop
+    tags:
+      - 'v*'
+  workflow_run:
+    workflows: ["CI Pipeline"]
+    types:
+      - completed
+    branches:
+      - main
+      - develop
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  deploy-staging:
+    runs-on: ubuntu-latest
+    name: Деплой в Staging
+    if: github.ref == 'refs/heads/develop' && github.event.workflow_run.conclusion == 'success'
+    environment: staging
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Настройка kubectl
+      uses: azure/setup-kubectl@v3
+      with:
+        version: 'v1.28.0'
+    
+    - name: Настройка Helm
+      uses: azure/setup-helm@v3
+      with:
+        version: 'v3.12.0'
+    
+    - name: Настройка kubeconfig
+      run: |
+        mkdir -p ~/.kube
+        echo "${{ secrets.STAGING_KUBECONFIG }}" | base64 -d > ~/.kube/config
+        chmod 600 ~/.kube/config
+    
+    - name: Деплой в Kubernetes (Staging)
+      run: |
+        helm upgrade --install access-manager-staging ./helm/access-manager \
+          --namespace staging \
+          --create-namespace \
+          --values ./helm/access-manager/values-staging.yaml \
+          --set image.tag=${{ github.sha }} \
+          --set database.host=${{ secrets.STAGING_DB_HOST }} \
+          --set database.password=${{ secrets.STAGING_DB_PASSWORD }} \
+          --set app.secretKey="${{ secrets.STAGING_SECRET_KEY }}" \
+          --wait --timeout=10m
+    
+    - name: Проверка деплоя
+      run: |
+        kubectl get pods -n staging -l app=access-manager
+        kubectl wait --for=condition=ready pod -l app=access-manager -n staging --timeout=300s
+    
+    - name: Запуск smoke тестов
+      run: |
+        STAGING_URL=${{ secrets.STAGING_URL }}
+        curl -f $STAGING_URL/docs
+        curl -f $STAGING_URL/health
+
+  deploy-production:
+    runs-on: ubuntu-latest
+    name: Деплой в Production
+    if: github.ref == 'refs/heads/main' && github.event.workflow_run.conclusion == 'success'
+    environment: production
+    needs: []
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Настройка kubectl
+      uses: azure/setup-kubectl@v3
+      with:
+        version: 'v1.28.0'
+    
+    - name: Настройка Helm
+      uses: azure/setup-helm@v3
+      with:
+        version: 'v3.12.0'
+    
+    - name: Настройка kubeconfig
+      run: |
+        mkdir -p ~/.kube
+        echo "${{ secrets.PROD_KUBECONFIG }}" | base64 -d > ~/.kube/config
+        chmod 600 ~/.kube/config
+    
+    - name: Резервное копирование БД
+      run: |
+        kubectl create job --from=cronjob/db-backup backup-pre-deploy-$(date +%Y%m%d%H%M%S) -n production
+    
+    - name: Деплой в Kubernetes (Production)
+      run: |
+        helm upgrade --install access-manager ./helm/access-manager \
+          --namespace production \
+          --create-namespace \
+          --values ./helm/access-manager/values-production.yaml \
+          --set image.tag=${{ github.sha }} \
+          --set database.host=${{ secrets.PROD_DB_HOST }} \
+          --set database.password=${{ secrets.PROD_DB_PASSWORD }} \
+          --set app.secretKey="${{ secrets.PROD_SECRET_KEY }}" \
+          --wait --timeout=15m
+    
+    - name: Проверка деплоя
+      run: |
+        kubectl get pods -n production -l app=access-manager
+        kubectl wait --for=condition=ready pod -l app=access-manager -n production --timeout=600s
+    
+    - name: Запуск smoke тестов
+      run: |
+        PROD_URL=${{ secrets.PROD_URL }}
+        curl -f $PROD_URL/docs
+        curl -f $PROD_URL/health
+    
+    - name: Уведомление об успешном деплое
+      uses: 8398a7/action-slack@v3
+      with:
+        status: success
+        channel: '#deployments'
+        text: '✅ Успешный деплой в Production: ${{ github.sha }}'
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+  docker-compose-deploy:
+    runs-on: ubuntu-latest
+    name: Деплой через Docker Compose
+    if: github.ref == 'refs/heads/main'
+    environment: docker-compose
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Деплой на сервер через SSH
+      uses: appleboy/ssh-action@v1.0.0
+      with:
+        host: ${{ secrets.DEPLOY_HOST }}
+        username: ${{ secrets.DEPLOY_USER }}
+        key: ${{ secrets.DEPLOY_SSH_KEY }}
+        port: ${{ secrets.DEPLOY_PORT }}
+        script: |
+          cd /opt/access-manager
+          git pull origin main
+          
+          # Создание .env файла с продакшн переменными
+          cat > .env << EOF
+          DATABASE_URL=${{ secrets.DATABASE_URL }}
+          SECRET_KEY=${{ secrets.SECRET_KEY }}
+          ALGORITHM=HS256
+          ACCESS_TOKEN_EXPIRE_MINUTES=30
+          POSTGRES_DB=access_db
+          POSTGRES_USER=access_user
+          POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
+          EOF
+          
+          # Остановка и обновление сервисов
+          docker-compose down
+          docker-compose pull
+          docker-compose up -d --remove-orphans
+          
+          # Ожидание готовности сервисов
+          sleep 30
+          
+          # Проверка здоровья
+          curl -f http://localhost:8000/docs || exit 1
+
+  release:
+    runs-on: ubuntu-latest
+    name: Создание релиза
+    if: startsWith(github.ref, 'refs/tags/v')
+    
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: Генерация changelog
+      id: changelog
+      uses: mikepenz/release-changelog-builder-action@v4
+      with:
+        configuration: ".github/changelog-config.json"
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Создание GitHub Release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ github.ref_name }}
+        release_name: Release ${{ github.ref_name }}
+        body: ${{ steps.changelog.outputs.changelog }}
+        draft: false
+        prerelease: false
+    
+    - name: Обновление Docker Hub описания
+      uses: peter-evans/dockerhub-description@v3
+      with:
+        username: ${{ secrets.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKER_PASSWORD }}
+        repository: ${{ secrets.DOCKER_USERNAME }}/access-manager
+        readme-filepath: ./README.md
+
+  notify-failure:
+    runs-on: ubuntu-latest
+    name: Уведомление о неудаче
+    if: failure()
+    needs: [deploy-staging, deploy-production, docker-compose-deploy]
+    
+    steps:
+    - name: Уведомление в Slack о неудаче
+      uses: 8398a7/action-slack@v3
+      with:
+        status: failure
+        channel: '#deployments'
+        text: '❌ Ошибка деплоя: ${{ github.sha }}'
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }} 

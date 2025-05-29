@@ -1,0 +1,12 @@
+apiVersion: v2
+name: access-manager
+description: Access Manager API Helm Chart
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+home: https://github.com/MordXD/access-manager
+sources:
+  - https://github.com/MordXD/access-manager
+maintainers:
+  - name: MordXD
+    email: kotkinegor78@gmail.com

@@ -1,0 +1,218 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+env:
+  PYTHON_VERSION: "3.12"
+  POETRY_VERSION: "1.7.1"
+
+jobs:
+  lint-and-format:
+    runs-on: ubuntu-latest
+    name: Линтинг и форматирование
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Настройка Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+    
+    - name: Установка Poetry
+      uses: snok/install-poetry@v1
+      with:
+        version: ${{ env.POETRY_VERSION }}
+        virtualenvs-create: true
+        virtualenvs-in-project: true
+    
+    - name: Кэширование зависимостей
+      uses: actions/cache@v3
+      with:
+        path: .venv
+        key: venv-${{ runner.os }}-${{ hashFiles('**/poetry.lock') }}
+    
+    - name: Установка зависимостей
+      run: poetry install --no-interaction --no-ansi
+    
+    - name: Проверка форматирования с Black
+      run: poetry run black --check --diff src tests
+    
+    - name: Проверка импортов с isort  
+      run: poetry run isort --check-only --diff src tests
+    
+    - name: Линтинг с flake8
+      run: |
+        poetry add --group dev flake8
+        poetry run flake8 src tests --max-line-length=88 --extend-ignore=E203,W503
+
+  test:
+    runs-on: ubuntu-latest
+    name: Тестирование
+    
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_USER: test_user
+          POSTGRES_DB: test_db
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Настройка Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+    
+    - name: Установка Poetry
+      uses: snok/install-poetry@v1
+      with:
+        version: ${{ env.POETRY_VERSION }}
+        virtualenvs-create: true
+        virtualenvs-in-project: true
+    
+    - name: Кэширование зависимостей
+      uses: actions/cache@v3
+      with:
+        path: .venv
+        key: venv-${{ runner.os }}-${{ hashFiles('**/poetry.lock') }}
+    
+    - name: Установка зависимостей
+      run: |
+        poetry install --no-interaction --no-ansi
+        poetry add --group dev pytest-cov
+    
+    - name: Запуск миграций
+      env:
+        DATABASE_URL: postgresql://test_user:test_password@localhost:5432/test_db
+      run: poetry run alembic upgrade head
+    
+    - name: Запуск тестов с покрытием
+      env:
+        DATABASE_URL: postgresql://test_user:test_password@localhost:5432/test_db
+        SECRET_KEY: test-secret-key
+        ALGORITHM: HS256
+        ACCESS_TOKEN_EXPIRE_MINUTES: 30
+      run: |
+        poetry run pytest tests/ \
+          --cov=src/access_manager \
+          --cov-report=xml \
+          --cov-report=html \
+          --cov-fail-under=80 \
+          -v
+    
+    - name: Загрузка покрытия в Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./coverage.xml
+        flags: unittests
+        name: codecov-umbrella
+
+  security-scan:
+    runs-on: ubuntu-latest
+    name: Сканирование безопасности
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Настройка Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+    
+    - name: Установка Poetry
+      uses: snok/install-poetry@v1
+      with:
+        version: ${{ env.POETRY_VERSION }}
+    
+    - name: Установка зависимостей
+      run: poetry install --no-interaction --no-ansi
+    
+    - name: Сканирование уязвимостей с Safety
+      run: |
+        poetry add --group dev safety
+        poetry run safety check
+    
+    - name: Сканирование секретов с GitLeaks
+      uses: gitleaks/gitleaks-action@v2
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  docker-build:
+    runs-on: ubuntu-latest
+    name: Сборка Docker образа
+    needs: [lint-and-format, test]
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Настройка Docker Buildx
+      uses: docker/setup-buildx-action@v3
+    
+    - name: Вход в Docker Hub
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKER_PASSWORD }}
+    
+    - name: Извлечение метаданных
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ secrets.DOCKER_USERNAME }}/access-manager
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=sha,prefix={{branch}}-
+          type=raw,value=latest,enable={{is_default_branch}}
+    
+    - name: Сборка и пуш образа
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        platforms: linux/amd64,linux/arm64
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+    
+    - name: Тестирование образа
+      run: |
+        docker run --rm ${{ secrets.DOCKER_USERNAME }}/access-manager:${{ github.sha }} --help || true
+
+  integration-test:
+    runs-on: ubuntu-latest
+    name: Интеграционные тесты
+    needs: [docker-build]
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Запуск сервисов через Docker Compose
+      run: |
+        docker-compose up -d db
+        sleep 10
+        docker-compose up -d backend
+        sleep 30
+    
+    - name: Проверка здоровья API
+      run: |
+        curl -f http://localhost:8000/docs || exit 1
+        curl -f http://localhost:8000/health || echo "Health endpoint not found"
+    
+    - name: Остановка сервисов
+      run: docker-compose down -v 
