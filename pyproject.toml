@@ -29,8 +29,8 @@ flake8 = "^7.1.1"
 safety = "^3.2.11"
 
 [tool.poetry.group.test.dependencies]
-factory-boy = "^3.4.0"
-faker = "^33.3.0"
+factory-boy = "^3.3.0"
+faker = "^30.0.0"
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
