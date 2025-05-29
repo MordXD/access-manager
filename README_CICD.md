@@ -11,6 +11,71 @@
 - 🔒 **Безопасность**: сканирование уязвимостей, проверка секретов
 - 📈 **Масштабируемость**: HPA, load balancing, резервное копирование
 
+## ⚠️ Важно: Настройка секретов
+
+**CI/CD будет работать частично без настройки секретов**, но для полной функциональности необходимо настроить GitHub Secrets.
+
+### Обязательные секреты для деплоя
+
+Настройте в **Settings → Secrets and variables → Actions**:
+
+#### Для Kubernetes деплоя:
+```bash
+# Staging окружение
+STAGING_KUBECONFIG=<base64_encoded_kubeconfig>
+STAGING_DB_HOST=staging-db.your-domain.com
+STAGING_DB_PASSWORD=your-staging-password
+STAGING_SECRET_KEY=your-staging-secret-key
+STAGING_URL=https://staging.your-domain.com
+
+# Production окружение  
+PROD_KUBECONFIG=<base64_encoded_kubeconfig>
+PROD_DB_HOST=prod-db.your-domain.com
+PROD_DB_PASSWORD=your-prod-password
+PROD_SECRET_KEY=your-prod-secret-key
+PROD_URL=https://your-domain.com
+```
+
+#### Для Docker Compose деплоя:
+```bash
+# SSH доступ к серверу
+DEPLOY_HOST=your-server.com
+DEPLOY_USER=deploy
+DEPLOY_SSH_KEY=<private_ssh_key>
+DEPLOY_PORT=22
+
+# Переменные приложения
+DATABASE_URL=postgresql://user:pass@host:5432/db
+SECRET_KEY=your-production-secret-key
+POSTGRES_PASSWORD=your-postgres-password
+```
+
+#### Для Docker Hub:
+```bash
+DOCKER_USERNAME=your-docker-username
+DOCKER_PASSWORD=your-docker-token
+```
+
+#### Для уведомлений (опционально):
+```bash
+SLACK_WEBHOOK_URL=https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK
+```
+
+### Что работает без секретов:
+
+- ✅ Линтинг и форматирование (Black, isort, flake8)
+- ✅ Тестирование с покрытием кода
+- ✅ Сканирование безопасности (Safety, GitLeaks)
+- ✅ Сборка Docker образов
+- ✅ Интеграционные тесты
+
+### Что требует секреты:
+
+- ❌ Деплой в Kubernetes
+- ❌ Деплой через Docker Compose
+- ❌ Slack уведомления
+- ❌ Мониторинг внешних URL
+
 ## 🚀 Быстрый старт
 
 ### 1. Настройка GitHub Secrets

@@ -50,7 +50,7 @@ jobs:
         poetry run flake8 src tests --max-line-length=88 --extend-ignore=E203,W503
     
     - name: Уведомление об ошибках линтинга
-      if: failure()
+      if: failure() && secrets.SLACK_WEBHOOK_URL != ''
       uses: 8398a7/action-slack@v3
       with:
         status: failure

@@ -23,7 +23,7 @@ jobs:
   deploy-staging:
     runs-on: ubuntu-latest
     name: Деплой в Staging
-    if: github.ref == 'refs/heads/develop' && github.event.workflow_run.conclusion == 'success'
+    if: github.ref == 'refs/heads/develop' && github.event.workflow_run.conclusion == 'success' && secrets.STAGING_KUBECONFIG != ''
     environment: staging
     
     steps:
@@ -71,7 +71,7 @@ jobs:
   deploy-production:
     runs-on: ubuntu-latest
     name: Деплой в Production
-    if: github.ref == 'refs/heads/main' && github.event.workflow_run.conclusion == 'success'
+    if: github.ref == 'refs/heads/main' && github.event.workflow_run.conclusion == 'success' && secrets.PROD_KUBECONFIG != ''
     environment: production
     needs: []
     
@@ -122,6 +122,7 @@ jobs:
         curl -f $PROD_URL/health
     
     - name: Уведомление об успешном деплое
+      if: success() && secrets.SLACK_WEBHOOK_URL != ''
       uses: 8398a7/action-slack@v3
       with:
         status: success
@@ -133,7 +134,7 @@ jobs:
   docker-compose-deploy:
     runs-on: ubuntu-latest
     name: Деплой через Docker Compose
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && secrets.DEPLOY_HOST != ''
     environment: docker-compose
     
     steps:
@@ -209,11 +210,33 @@ jobs:
         repository: ${{ secrets.DOCKER_USERNAME }}/access-manager
         readme-filepath: ./README.md
 
+  skip-deploy-notification:
+    runs-on: ubuntu-latest
+    name: Уведомление о пропуске деплоя
+    if: github.ref == 'refs/heads/main' && (secrets.STAGING_KUBECONFIG == '' && secrets.PROD_KUBECONFIG == '' && secrets.DEPLOY_HOST == '')
+    
+    steps:
+    - name: Уведомление о пропуске деплоя
+      run: |
+        echo "ℹ️ Деплой пропущен - не настроены секреты для деплоя"
+        echo "Настройте один из следующих наборов секретов в GitHub:"
+        echo ""
+        echo "Для Kubernetes деплоя:"
+        echo "- STAGING_KUBECONFIG, STAGING_DB_HOST, STAGING_DB_PASSWORD, STAGING_SECRET_KEY, STAGING_URL"
+        echo "- PROD_KUBECONFIG, PROD_DB_HOST, PROD_DB_PASSWORD, PROD_SECRET_KEY, PROD_URL"
+        echo ""
+        echo "Для Docker Compose деплоя:"
+        echo "- DEPLOY_HOST, DEPLOY_USER, DEPLOY_SSH_KEY, DEPLOY_PORT"
+        echo "- DATABASE_URL, SECRET_KEY, POSTGRES_PASSWORD"
+        echo ""
+        echo "Для Slack уведомлений:"
+        echo "- SLACK_WEBHOOK_URL"
+
   notify-failure:
     runs-on: ubuntu-latest
     name: Уведомление о неудаче
-    if: failure()
-    needs: [deploy-staging, deploy-production, docker-compose-deploy]
+    if: failure() && secrets.SLACK_WEBHOOK_URL != ''
+    needs: [deploy-staging, deploy-production, docker-compose-deploy, skip-deploy-notification]
     
     steps:
     - name: Уведомление в Slack о неудаче

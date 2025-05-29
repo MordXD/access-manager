@@ -40,7 +40,7 @@ jobs:
         fi
     
     - name: Уведомление о проблемах
-      if: failure()
+      if: failure() && secrets.SLACK_WEBHOOK_URL != ''
       uses: 8398a7/action-slack@v3
       with:
         status: failure
@@ -81,7 +81,7 @@ jobs:
         PGPASSWORD="$DB_PASSWORD" psql -h "$DB_HOST" -U access_user -d access_db -c "SELECT 1;"
     
     - name: Уведомление о проблемах с БД
-      if: failure()
+      if: failure() && secrets.SLACK_WEBHOOK_URL != ''
       uses: 8398a7/action-slack@v3
       with:
         status: failure
@@ -141,7 +141,7 @@ jobs:
         k6 run load-test.js
     
     - name: Результаты нагрузочного тестирования
-      if: always()
+      if: always() && secrets.SLACK_WEBHOOK_URL != ''
       uses: 8398a7/action-slack@v3
       with:
         status: ${{ job.status }}
@@ -180,7 +180,7 @@ jobs:
         done
     
     - name: Уведомление о проблемах с SSL
-      if: failure()
+      if: failure() && secrets.SLACK_WEBHOOK_URL != ''
       uses: 8398a7/action-slack@v3
       with:
         status: failure
@@ -207,7 +207,7 @@ jobs:
         # kubectl get jobs -n production -l app=db-backup --sort-by=.metadata.creationTimestamp
     
     - name: Уведомление о проблемах с бэкапами
-      if: failure()
+      if: failure() && secrets.SLACK_WEBHOOK_URL != ''
       uses: 8398a7/action-slack@v3
       with:
         status: failure
