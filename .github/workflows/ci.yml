@@ -47,8 +47,19 @@ jobs:
     
     - name: Линтинг с flake8
       run: |
-        poetry add --group dev flake8
         poetry run flake8 src tests --max-line-length=88 --extend-ignore=E203,W503
+    
+    - name: Уведомление об ошибках линтинга
+      if: failure()
+      uses: 8398a7/action-slack@v3
+      with:
+        status: failure
+        channel: '#ci-cd'
+        text: |
+          ❌ Ошибки в линтинге и форматировании
+          Проверьте код перед коммитом: ${{ github.sha }}
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
 
   test:
     runs-on: ubuntu-latest
@@ -93,7 +104,6 @@ jobs:
     - name: Установка зависимостей
       run: |
         poetry install --no-interaction --no-ansi
-        poetry add --group dev pytest-cov
     
     - name: Запуск миграций
       env:
@@ -143,7 +153,6 @@ jobs:
     
     - name: Сканирование уязвимостей с Safety
       run: |
-        poetry add --group dev safety
         poetry run safety check
     
     - name: Сканирование секретов с GitLeaks
