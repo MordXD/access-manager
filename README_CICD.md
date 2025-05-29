@@ -194,6 +194,95 @@ helm lint ./helm/access-manager
 - [ ] Интегрируйте с Sentry для error tracking
 - [ ] Добавьте database миграции rollback
 
+## Настройка уведомлений
+
+### Отключение email уведомлений от GitHub Actions
+
+Чтобы не получать email уведомления о каждом запуске CI/CD:
+
+1. Перейдите в настройки GitHub: https://github.com/settings/notifications
+2. В разделе "Actions" снимите галочку с "Email" для:
+   - "Failed workflows only" (только неудачные workflow)
+   - "Successful workflows" (успешные workflow)
+
+### Настройка Slack уведомлений
+
+Для настройки Slack уведомлений добавьте секреты в GitHub:
+
+```bash
+# В настройках репозитория -> Settings -> Secrets and variables -> Actions
+SLACK_WEBHOOK_URL=https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK
+```
+
+### Типы уведомлений
+
+- **Ошибки линтинга**: отправляются в канал `#ci-cd`
+- **Ошибки деплоя**: отправляются в канал `#deployments`
+- **Проблемы безопасности**: отправляются в канал `#security`
+- **Мониторинг**: отправляются в канал `#alerts`
+
+### Отключение уведомлений
+
+Чтобы полностью отключить Slack уведомления, удалите секрет `SLACK_WEBHOOK_URL` из настроек репозитория.
+
+## Мониторинг и алерты
+
+### Автоматические проверки
+
+- **Health checks**: каждые 5 минут проверяется доступность API
+- **Database checks**: проверка подключения к базе данных
+- **SSL certificates**: проверка срока действия сертификатов
+- **Performance tests**: нагрузочное тестирование (запускается вручную)
+
+### Настройка мониторинга
+
+1. Добавьте URL-адреса ваших сред в секреты:
+   ```
+   STAGING_URL=https://staging.your-domain.com
+   PROD_URL=https://your-domain.com
+   ```
+
+2. Настройте доступ к базам данных:
+   ```
+   STAGING_DB_HOST=staging-db.your-domain.com
+   STAGING_DB_PASSWORD=your-staging-password
+   PROD_DB_HOST=prod-db.your-domain.com
+   PROD_DB_PASSWORD=your-prod-password
+   ```
+
+### Ручной запуск мониторинга
+
+Вы можете запустить проверки вручную:
+1. Перейдите в Actions -> Monitoring & Alerts
+2. Нажмите "Run workflow"
+3. Выберите нужные параметры
+
+## Устранение проблем
+
+### Частые ошибки
+
+1. **Poetry lock file conflicts**: 
+   ```bash
+   rm poetry.lock
+   poetry lock
+   ```
+
+2. **Dependency version conflicts**:
+   ```bash
+   poetry update
+   ```
+
+3. **Docker build failures**:
+   ```bash
+   docker system prune -a
+   ```
+
+### Логи и отладка
+
+- Логи CI/CD доступны в GitHub Actions
+- Логи приложения доступны через `kubectl logs` или `docker logs`
+- Для отладки используйте `poetry run python -m pdb your_script.py`
+
 ---
 
 **Сделано с ❤️ для современной разработки**

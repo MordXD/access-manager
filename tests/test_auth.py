@@ -1,6 +1,7 @@
 # tests/test_auth.py
-import pytest
 from uuid import uuid4
+
+import pytest
 
 from src.access_manager.models import User
 from src.access_manager.security import get_password_hash

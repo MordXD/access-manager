@@ -1,35 +1,38 @@
 from datetime import datetime, timedelta, timezone
-from typing import Optional, Dict, Any
+from typing import Any, Dict, Optional
 
+from fastapi import Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from pydantic import BaseModel, ValidationError
-from fastapi import Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.access_manager.db import get_db
 from src.access_manager import crud
-from src.access_manager.models import User as UserModel
 from src.access_manager.core.config import settings
+from src.access_manager.db import get_db
+from src.access_manager.models import User as UserModel
 
 # --- Password hashing ---
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
+
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     return pwd_context.verify(plain_password, hashed_password)
 
+
 def get_password_hash(password: str) -> str:
     return pwd_context.hash(password)
+
 
 # --- JWT settings ---
 SECRET_KEY = settings.secret_key
 ALGORITHM = settings.algorithm
 ACCESS_TOKEN_EXPIRE_MINUTES = settings.access_token_expire_minutes
 
+
 def create_access_token(
-    data: Dict[str, Any],
-    expires_delta: Optional[timedelta] = None
+    data: Dict[str, Any], expires_delta: Optional[timedelta] = None
 ) -> str:
     to_encode = data.copy()
     now = datetime.now(timezone.utc)
@@ -37,11 +40,13 @@ def create_access_token(
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
+
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login/token")
 
 
 class TokenData(BaseModel):
     sub: Optional[str] = None
+
 
 async def decode_access_token(token: str) -> Dict[str, Any]:
     credentials_exception = HTTPException(
@@ -58,11 +63,11 @@ async def decode_access_token(token: str) -> Dict[str, Any]:
         raise credentials_exception
 
 
-# --- Новая зависимость: текущий активный пользователь --- 
+# --- Новая зависимость: текущий активный пользователь ---
+
 
 async def get_current_user_from_payload(
-    payload: Dict[str, Any],
-    db: AsyncSession
+    payload: Dict[str, Any], db: AsyncSession
 ) -> Optional[UserModel]:
     sub = payload.get("sub")
     if sub is None:
@@ -96,25 +101,25 @@ async def get_current_active_user(
         )
     return user
 
+
 def require_permission(*permission_names: str):
     """
     Возвращает зависимость, которая проверяет,
     что у current_user есть хотя бы одно из перечисленных имен разрешений.
     """
+
     async def dependency(
-        current_user: UserModel = Depends(get_current_active_user)
+        current_user: UserModel = Depends(get_current_active_user),
     ) -> UserModel:
         # Собираем имена всех разрешений пользователя через его роли
         user_perms = {
-            perm.name
-            for role in current_user.roles
-            for perm in role.permissions
+            perm.name for role in current_user.roles for perm in role.permissions
         }
         # Проверяем наличие хотя бы одного требуемого
         if not any(name in user_perms for name in permission_names):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Permission(s) {permission_names} required"
+                detail=f"Permission(s) {permission_names} required",
             )
         return current_user
 

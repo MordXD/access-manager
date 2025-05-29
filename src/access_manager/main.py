@@ -1,26 +1,25 @@
 # src/access_manager/main.py
 
+import time
 from datetime import timedelta
 from typing import Annotated
-import time
+
 import psutil
-import asyncio
-
-from fastapi import FastAPI, Depends, HTTPException, status, Request
-from fastapi.security import OAuth2PasswordRequestForm
-from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.access_manager import crud, schemas
-from src.access_manager.db import get_db
-from src.access_manager import security
+from src.access_manager import crud, schemas, security
 from src.access_manager.core.config import settings
+from src.access_manager.db import get_db
 from src.access_manager.models import User as UserModel
 
 app = FastAPI(title="Access Manager API")
 
 origins = ["http://localhost:3000"]
+
 
 # Middleware для логирования времени запросов
 @app.middleware("http")
@@ -31,13 +30,15 @@ async def add_process_time_header(request: Request, call_next):
     response.headers["X-Process-Time"] = str(process_time)
     return response
 
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
-    allow_credentials=True, 
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 # Health Check Endpoint
 @app.get("/health")
@@ -48,51 +49,44 @@ async def health_check(db: AsyncSession = Depends(get_db)):
     health_status = {
         "status": "healthy",
         "timestamp": time.time(),
-        "version": "0.1.0",
-        "checks": {}
+        "checks": {
+            "database": {"status": "unknown"},
+            "resources": {"status": "unknown"},
+        },
     }
-    
-    # Проверка подключения к базе данных
+
+    # Check database
     try:
-        result = await db.execute(text("SELECT 1"))
-        await result.fetchone()
-        health_status["checks"]["database"] = {
-            "status": "healthy",
-            "response_time": time.time()
-        }
+        await db.execute(text("SELECT 1"))
+        health_status["checks"]["database"] = {"status": "healthy"}
     except Exception as e:
         health_status["status"] = "unhealthy"
-        health_status["checks"]["database"] = {
-            "status": "unhealthy",
-            "error": str(e)
-        }
-    
-    # Проверка использования ресурсов
+        health_status["checks"]["database"] = {"status": "unhealthy", "error": str(e)}
+
+    # Check system resources
     try:
-        cpu_percent = psutil.cpu_percent(interval=0.1)
+        cpu_usage = psutil.cpu_percent(interval=0.1)
         memory = psutil.virtual_memory()
-        disk = psutil.disk_usage('/')
-        
-        health_status["checks"]["resources"] = {
-            "status": "healthy",
-            "cpu_percent": cpu_percent,
-            "memory_percent": memory.percent,
-            "disk_percent": disk.percent
-        }
-        
-        # Предупреждение при высоком использовании ресурсов
-        if cpu_percent > 80 or memory.percent > 80 or disk.percent > 90:
+
+        if cpu_usage > 90 or memory.percent > 90:
             health_status["status"] = "degraded"
-            health_status["checks"]["resources"]["status"] = "degraded"
-            
+            health_status["checks"]["resources"] = {
+                "status": "degraded",
+                "cpu": cpu_usage,
+                "memory": memory.percent,
+            }
+        else:
+            health_status["checks"]["resources"] = {
+                "status": "healthy",
+                "cpu": cpu_usage,
+                "memory": memory.percent,
+            }
     except Exception as e:
-        health_status["checks"]["resources"] = {
-            "status": "unhealthy",
-            "error": str(e)
-        }
-    
+        health_status["checks"]["resources"] = {"status": "unhealthy", "error": str(e)}
+
     status_code = 200 if health_status["status"] in ["healthy", "degraded"] else 503
-    return health_status
+    return Response(content=str(health_status), status_code=status_code)
+
 
 @app.get("/metrics")
 async def get_metrics(db: AsyncSession = Depends(get_db)):
@@ -102,14 +96,14 @@ async def get_metrics(db: AsyncSession = Depends(get_db)):
     try:
         # Получение базовых метрик
         users_count = await crud.get_users_count(db)
-        roles_count = await crud.get_roles_count(db) 
+        roles_count = await crud.get_roles_count(db)
         permissions_count = await crud.get_permissions_count(db)
-        
+
         # Системные метрики
         cpu_usage = psutil.cpu_percent(interval=0.1)
         memory = psutil.virtual_memory()
-        disk = psutil.disk_usage('/')
-        
+        disk = psutil.disk_usage("/")
+
         metrics = f"""# HELP access_manager_users_total Total number of users
 # TYPE access_manager_users_total gauge
 access_manager_users_total {users_count}
@@ -134,18 +128,20 @@ access_manager_memory_usage_percent {memory.percent}
 # TYPE access_manager_disk_usage_percent gauge
 access_manager_disk_usage_percent {disk.percent}
 """
-        
+
         return metrics
-        
+
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to collect metrics: {str(e)}"
+            detail=f"Failed to collect metrics: {str(e)}",
         )
+
 
 # --------------------------------------
 #   AUTH: получение и проверка токена
 # --------------------------------------
+
 
 class TokenResponse(schemas.BaseModel):
     access_token: str
@@ -158,7 +154,9 @@ async def login_for_access_token(
     db: AsyncSession = Depends(get_db),
 ):
     user = await crud.get_user_by_username(db, form_data.username)
-    if not user or not security.verify_password(form_data.password, user.hashed_password):
+    if not user or not security.verify_password(
+        form_data.password, user.hashed_password
+    ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
@@ -167,8 +165,7 @@ async def login_for_access_token(
 
     expires = timedelta(minutes=settings.access_token_expire_minutes)
     token = security.create_access_token(
-        data={"sub": str(user.id)},
-        expires_delta=expires
+        data={"sub": str(user.id)}, expires_delta=expires
     )
     return {"access_token": token, "token_type": "bearer"}
 
@@ -177,10 +174,9 @@ async def login_for_access_token(
 #   РЕГИСТРАЦИЯ НОВОГО ПОЛЬЗОВАТЕЛЯ
 # --------------------------------------
 
+
 @app.post(
-    "/register",
-    response_model=schemas.UserRead,
-    status_code=status.HTTP_201_CREATED
+    "/register", response_model=schemas.UserRead, status_code=status.HTTP_201_CREATED
 )
 async def register_new_user(
     payload: schemas.UserCreate,
@@ -197,6 +193,7 @@ async def register_new_user(
 #   ЗАЩИЩЕННЫЕ ЭНДПОИНТЫ
 # --------------------------------------
 
+
 @app.get("/users/me", response_model=schemas.UserRead)
 async def read_users_me(
     current_user: UserModel = Depends(security.get_current_active_user),
@@ -208,9 +205,7 @@ async def read_users_me(
 
 
 @app.post(
-    "/users/",
-    response_model=schemas.UserRead,
-    status_code=status.HTTP_201_CREATED
+    "/users/", response_model=schemas.UserRead, status_code=status.HTTP_201_CREATED
 )
 async def create_user(
     payload: schemas.UserCreate,
@@ -224,10 +219,7 @@ async def create_user(
     return await crud.create_user(db, payload)
 
 
-@app.get(
-    "/users/{user_id}",
-    response_model=schemas.UserRead
-)
+@app.get("/users/{user_id}", response_model=schemas.UserRead)
 async def read_user(
     user_id: int,
     current_user: UserModel = Depends(security.require_permission("read_user")),
@@ -243,10 +235,7 @@ async def read_user(
     return user
 
 
-@app.get(
-    "/users/",
-    response_model=list[schemas.UserRead]
-)
+@app.get("/users/", response_model=list[schemas.UserRead])
 async def read_users(
     current_user: UserModel = Depends(security.require_permission("read_user")),
     skip: int = 0,
@@ -260,10 +249,7 @@ async def read_users(
     return await crud.get_users(db, skip, limit)
 
 
-@app.put(
-    "/users/{user_id}",
-    response_model=schemas.UserRead
-)
+@app.put("/users/{user_id}", response_model=schemas.UserRead)
 async def update_user(
     user_id: int,
     payload: schemas.UserUpdate,
@@ -280,10 +266,7 @@ async def update_user(
     return user
 
 
-@app.delete(
-    "/users/{user_id}",
-    response_model=schemas.UserRead
-)
+@app.delete("/users/{user_id}", response_model=schemas.UserRead)
 async def delete_user(
     user_id: int,
     current_user: UserModel = Depends(security.require_permission("delete_user")),
@@ -303,10 +286,9 @@ async def delete_user(
 #   ROLE эндпоинты
 # --------------------------------------
 
+
 @app.post(
-    "/roles/",
-    response_model=schemas.RoleRead,
-    status_code=status.HTTP_201_CREATED
+    "/roles/", response_model=schemas.RoleRead, status_code=status.HTTP_201_CREATED
 )
 async def create_role(
     payload: schemas.RoleCreate,
@@ -320,10 +302,7 @@ async def create_role(
     return await crud.create_role(db, payload)
 
 
-@app.get(
-    "/roles/{role_id}",
-    response_model=schemas.RoleRead
-)
+@app.get("/roles/{role_id}", response_model=schemas.RoleRead)
 async def read_role(
     role_id: int,
     current_user: UserModel = Depends(security.require_permission("read_role")),
@@ -339,10 +318,7 @@ async def read_role(
     return role
 
 
-@app.get(
-    "/roles/",
-    response_model=list[schemas.RoleRead]
-)
+@app.get("/roles/", response_model=list[schemas.RoleRead])
 async def read_roles(
     current_user: UserModel = Depends(security.require_permission("read_role")),
     skip: int = 0,
@@ -356,10 +332,7 @@ async def read_roles(
     return await crud.get_roles(db, skip, limit)
 
 
-@app.put(
-    "/roles/{role_id}",
-    response_model=schemas.RoleRead
-)
+@app.put("/roles/{role_id}", response_model=schemas.RoleRead)
 async def update_role(
     role_id: int,
     payload: schemas.RoleUpdate,
@@ -376,10 +349,7 @@ async def update_role(
     return role
 
 
-@app.delete(
-    "/roles/{role_id}",
-    response_model=schemas.RoleRead
-)
+@app.delete("/roles/{role_id}", response_model=schemas.RoleRead)
 async def delete_role(
     role_id: int,
     current_user: UserModel = Depends(security.require_permission("delete_role")),
@@ -399,10 +369,11 @@ async def delete_role(
 #   PERMISSION эндпоинты
 # --------------------------------------
 
+
 @app.post(
     "/permissions/",
     response_model=schemas.PermissionRead,
-    status_code=status.HTTP_201_CREATED
+    status_code=status.HTTP_201_CREATED,
 )
 async def create_permission(
     payload: schemas.PermissionCreate,
@@ -416,10 +387,7 @@ async def create_permission(
     return await crud.create_permission(db, payload)
 
 
-@app.get(
-    "/permissions/{perm_id}",
-    response_model=schemas.PermissionRead
-)
+@app.get("/permissions/{perm_id}", response_model=schemas.PermissionRead)
 async def read_permission(
     perm_id: int,
     current_user: UserModel = Depends(security.require_permission("read_permission")),
@@ -435,10 +403,7 @@ async def read_permission(
     return perm
 
 
-@app.get(
-    "/permissions/",
-    response_model=list[schemas.PermissionRead]
-)
+@app.get("/permissions/", response_model=list[schemas.PermissionRead])
 async def read_permissions(
     current_user: UserModel = Depends(security.require_permission("read_permission")),
     skip: int = 0,
@@ -452,10 +417,7 @@ async def read_permissions(
     return await crud.get_permissions(db, skip, limit)
 
 
-@app.put(
-    "/permissions/{perm_id}",
-    response_model=schemas.PermissionRead
-)
+@app.put("/permissions/{perm_id}", response_model=schemas.PermissionRead)
 async def update_permission(
     perm_id: int,
     payload: schemas.PermissionUpdate,
@@ -472,10 +434,7 @@ async def update_permission(
     return perm
 
 
-@app.delete(
-    "/permissions/{perm_id}",
-    response_model=schemas.PermissionRead
-)
+@app.delete("/permissions/{perm_id}", response_model=schemas.PermissionRead)
 async def delete_permission(
     perm_id: int,
     current_user: UserModel = Depends(security.require_permission("delete_permission")),

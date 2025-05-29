@@ -1,7 +1,6 @@
 # src/access_manager/crud.py
 
 from typing import List, Optional
-from datetime import timedelta
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
@@ -9,42 +8,38 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
-from .models import User, Role, Permission
-from .schemas import (
-    UserCreate, UserUpdate,
-    RoleCreate, RoleUpdate,
-    PermissionCreate, PermissionUpdate,
-)
 from src.access_manager.security import get_password_hash
 
+from .models import Permission, Role, User
+from .schemas import (
+    PermissionCreate,
+    PermissionUpdate,
+    RoleCreate,
+    RoleUpdate,
+    UserCreate,
+    UserUpdate,
+)
 
 # ——— USER ———
+
 
 async def get_user(db: AsyncSession, user_id: int) -> Optional[User]:
     result = await db.execute(
         select(User)
-        .options(
-            joinedload(User.roles).joinedload(Role.permissions)
-        )
+        .options(joinedload(User.roles).joinedload(Role.permissions))
         .where(User.id == user_id)
     )
     return result.scalar_one_or_none()
 
 
 async def get_user_by_username(db: AsyncSession, username: str) -> Optional[User]:
-    result = await db.execute(
-        select(User)
-        .where(User.username == username)
-    )
+    result = await db.execute(select(User).where(User.username == username))
     return result.scalar_one_or_none()
 
 
 async def get_users(db: AsyncSession, skip: int = 0, limit: int = 100) -> List[User]:
     result = await db.execute(
-        select(User)
-        .options(joinedload(User.roles))
-        .offset(skip)
-        .limit(limit)
+        select(User).options(joinedload(User.roles)).offset(skip).limit(limit)
     )
     return result.scalars().all()
 
@@ -68,7 +63,7 @@ async def create_user(db: AsyncSession, data: UserCreate) -> User:
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="User with given username or email already exists."
+            detail="User with given username or email already exists.",
         )
 
     # reload with eager relationships
@@ -80,7 +75,9 @@ async def create_user(db: AsyncSession, data: UserCreate) -> User:
     return result.unique().scalar_one()
 
 
-async def update_user(db: AsyncSession, user_id: int, data: UserUpdate) -> Optional[User]:
+async def update_user(
+    db: AsyncSession, user_id: int, data: UserUpdate
+) -> Optional[User]:
     user = await get_user(db, user_id)
     if not user:
         return None
@@ -100,7 +97,7 @@ async def update_user(db: AsyncSession, user_id: int, data: UserUpdate) -> Optio
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Update conflict: fields must be unique."
+            detail="Update conflict: fields must be unique.",
         )
 
     # reload with eager relationships
@@ -123,21 +120,17 @@ async def delete_user(db: AsyncSession, user_id: int) -> Optional[User]:
 
 # ——— ROLE ———
 
+
 async def get_role(db: AsyncSession, role_id: int) -> Optional[Role]:
     result = await db.execute(
-        select(Role)
-        .options(joinedload(Role.permissions))
-        .where(Role.id == role_id)
+        select(Role).options(joinedload(Role.permissions)).where(Role.id == role_id)
     )
     return result.scalar_one_or_none()
 
 
 async def get_roles(db: AsyncSession, skip: int = 0, limit: int = 100) -> List[Role]:
     result = await db.execute(
-        select(Role)
-        .options(joinedload(Role.permissions))
-        .offset(skip)
-        .limit(limit)
+        select(Role).options(joinedload(Role.permissions)).offset(skip).limit(limit)
     )
     return result.scalars().all()
 
@@ -145,7 +138,9 @@ async def get_roles(db: AsyncSession, skip: int = 0, limit: int = 100) -> List[R
 async def create_role(db: AsyncSession, data: RoleCreate) -> Role:
     role = Role(name=data.name, description=data.description or "")
     if data.permission_ids:
-        q = await db.execute(select(Permission).where(Permission.id.in_(data.permission_ids)))
+        q = await db.execute(
+            select(Permission).where(Permission.id.in_(data.permission_ids))
+        )
         role.permissions = q.scalars().all()
 
     db.add(role)
@@ -155,18 +150,18 @@ async def create_role(db: AsyncSession, data: RoleCreate) -> Role:
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Role with given name already exists."
+            detail="Role with given name already exists.",
         )
 
     result = await db.execute(
-        select(Role)
-        .options(joinedload(Role.permissions))
-        .where(Role.id == role.id)
+        select(Role).options(joinedload(Role.permissions)).where(Role.id == role.id)
     )
     return result.scalar_one()
 
 
-async def update_role(db: AsyncSession, role_id: int, data: RoleUpdate) -> Optional[Role]:
+async def update_role(
+    db: AsyncSession, role_id: int, data: RoleUpdate
+) -> Optional[Role]:
     role = await get_role(db, role_id)
     if not role:
         return None
@@ -184,13 +179,11 @@ async def update_role(db: AsyncSession, role_id: int, data: RoleUpdate) -> Optio
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Update conflict: fields must be unique."
+            detail="Update conflict: fields must be unique.",
         )
 
     result = await db.execute(
-        select(Role)
-        .options(joinedload(Role.permissions))
-        .where(Role.id == role.id)
+        select(Role).options(joinedload(Role.permissions)).where(Role.id == role.id)
     )
     return result.scalar_one()
 
@@ -206,20 +199,16 @@ async def delete_role(db: AsyncSession, role_id: int) -> Optional[Role]:
 
 # ——— PERMISSION ———
 
+
 async def get_permission(db: AsyncSession, perm_id: int) -> Optional[Permission]:
-    result = await db.execute(
-        select(Permission)
-        .where(Permission.id == perm_id)
-    )
+    result = await db.execute(select(Permission).where(Permission.id == perm_id))
     return result.scalar_one_or_none()
 
 
-async def get_permissions(db: AsyncSession, skip: int = 0, limit: int = 100) -> List[Permission]:
-    result = await db.execute(
-        select(Permission)
-        .offset(skip)
-        .limit(limit)
-    )
+async def get_permissions(
+    db: AsyncSession, skip: int = 0, limit: int = 100
+) -> List[Permission]:
+    result = await db.execute(select(Permission).offset(skip).limit(limit))
     return result.scalars().all()
 
 
@@ -232,17 +221,16 @@ async def create_permission(db: AsyncSession, data: PermissionCreate) -> Permiss
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Permission with given name already exists."
+            detail="Permission with given name already exists.",
         )
 
-    result = await db.execute(
-        select(Permission)
-        .where(Permission.id == perm.id)
-    )
+    result = await db.execute(select(Permission).where(Permission.id == perm.id))
     return result.scalar_one()
 
 
-async def update_permission(db: AsyncSession, perm_id: int, data: PermissionUpdate) -> Optional[Permission]:
+async def update_permission(
+    db: AsyncSession, perm_id: int, data: PermissionUpdate
+) -> Optional[Permission]:
     perm = await get_permission(db, perm_id)
     if not perm:
         return None
@@ -256,13 +244,10 @@ async def update_permission(db: AsyncSession, perm_id: int, data: PermissionUpda
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Update conflict: fields must be unique."
+            detail="Update conflict: fields must be unique.",
         )
 
-    result = await db.execute(
-        select(Permission)
-        .where(Permission.id == perm.id)
-    )
+    result = await db.execute(select(Permission).where(Permission.id == perm.id))
     return result.scalar_one()
 
 

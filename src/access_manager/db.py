@@ -1,8 +1,9 @@
 from typing import AsyncGenerator
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.orm import sessionmaker
-from src.access_manager.core.config import settings
 
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy.orm import sessionmaker
+
+from src.access_manager.core.config import settings
 
 DATABASE_URL = str(settings.postgres_dsn)  # ожидается async-DSN: postgres+asyncpg://...
 
@@ -18,6 +19,7 @@ AsyncSessionLocal = sessionmaker(
     autoflush=False,
     expire_on_commit=False,
 )
+
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     async with AsyncSessionLocal() as session:

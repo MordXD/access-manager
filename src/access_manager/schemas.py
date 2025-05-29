@@ -1,13 +1,14 @@
 from __future__ import annotations
+
 from datetime import datetime
 from typing import List, Optional
 
-from pydantic import BaseModel, Field, EmailStr
-
+from pydantic import BaseModel, EmailStr, Field
 
 # ----------------------
 # Permission Schemas
 # ----------------------
+
 
 class PermissionRead(BaseModel):
     id: int
@@ -16,9 +17,7 @@ class PermissionRead(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    model_config = {
-        "from_attributes": True
-    }
+    model_config = {"from_attributes": True}
 
 
 class PermissionCreate(BaseModel):
@@ -35,6 +34,7 @@ class PermissionUpdate(BaseModel):
 # Role Schemas
 # ----------------------
 
+
 class RoleRead(BaseModel):
     id: int
     name: str
@@ -43,9 +43,7 @@ class RoleRead(BaseModel):
     updated_at: datetime
     permissions: List[PermissionRead] = []
 
-    model_config = {
-        "from_attributes": True
-    }
+    model_config = {"from_attributes": True}
 
 
 class RoleCreate(BaseModel):
@@ -64,6 +62,7 @@ class RoleUpdate(BaseModel):
 # User Schemas
 # ----------------------
 
+
 class UserRead(BaseModel):
     id: int
     username: str
@@ -74,9 +73,7 @@ class UserRead(BaseModel):
     updated_at: datetime
     roles: List[RoleRead] = []
 
-    model_config = {
-        "from_attributes": True
-    }
+    model_config = {"from_attributes": True}
 
 
 class UserCreate(BaseModel):
